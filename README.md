@@ -1,33 +1,13 @@
-# Spam Classification from Scratch: Logistic Regression & Naive Bayes in NumPy
+# Enron Spam Classifier
 
-Two text classifiers — **logistic regression** and **Naive Bayes** — built from
-first principles on the Enron spam corpus (~33k emails). This project does not use any 
-high-level libraries like scikit-learn. Instead, everything is implemented manually using
-NumPy arrays and Pandas. The loss function,
+Logistic regression and multinomial Naive Bayes implemented from scratch in
+NumPy, trained on the Enron spam corpus (~33k emails). On a held-out 20% split,
+Naive Bayes reaches **95.5% accuracy / 93.9% precision / 97.6% recall**, and
+L2-regularized logistic regression is close behind at 94.6% accuracy.
 
-The loss function, the gradient, the weight updates, the regularization penalties, the convergence
-check, the class priors and smoothed likelihoods, the log-space scoring, and
-the evaluation metrics are all written directly on NumPy arrays. No
-`.fit()`, no `.predict()`, no black boxes — every line of model logic is
-visible and derived from the math it implements!
-
-- **Logistic regression** trained with batch gradient descent on the
-  binary cross-entropy loss, with switchable L1 / L2 regularization and a
-  convergence-based stopping rule.
-- **Multinomial Naive Bayes** with Laplace smoothing, evaluated entirely in
-  log space.
-- **Evaluation** — accuracy, precision, and recall computed from the confusion
-  counts.
-
-## Contents
-
-- [Quick start](#quick-start)
-- [Pipeline](#pipeline)
-- [Logistic regression](#logistic-regression)
-- [Naive Bayes](#naive-bayes)
-- [Evaluation](#evaluation)
-- [Results](#results)
-- [Repository layout](#repository-layout)
+Only the bag-of-words step uses scikit-learn's `CountVectorizer`; the training
+loops, loss, gradients, regularization, smoothing, and evaluation metrics are
+written directly on NumPy arrays.
 
 ## Quick start
 
@@ -41,220 +21,77 @@ uv sync
 uv run python main.py
 ```
 
-The script expects `enron_spam_data.csv` in the working directory. A full run
-(both regularization modes for logistic regression, plus Naive Bayes) takes
-roughly 15–20 seconds on a laptop.
+Expects `enron_spam_data.csv` in the working directory. A full run takes about
+15–20 seconds.
 
 ## Pipeline
 
-1. **Load** the CSV and drop rows whose `Message` field is empty.
-2. **Vectorize** each message into a bag-of-words count vector over the
-   1,000 most frequent tokens, giving a feature matrix
-   $X \in \mathbb{N}^{n \times d}$ with $d = 1000$.
-3. **Label** $y_i = 1$ for spam, $0$ for ham.
-4. **Split** by assigning every row a random fold id in $\{0, \dots, 4\}$ and
-   holding out one fold, yielding an ~80/20 train/test split. The same fold
-   machinery generalizes to $k$-fold cross-validation if desired.
-5. **Prepend a bias column** of ones so the intercept is learned as
-   $w_0$ rather than tracked separately.
-6. **Train and evaluate** both models on the same split.
+1. Load the CSV and drop rows with an empty `Message`.
+2. Vectorize each message into a count vector over the 1,000 most frequent
+   tokens.
+3. Label spam as 1, ham as 0.
+4. Assign each row a random fold id in $\{0,\dots,4\}$ and hold out one fold
+   (~80/20 split).
+5. Prepend a bias column so the intercept is learned as $w_0$.
+6. Train and evaluate both models on the same split.
 
 ## Logistic regression
 
-### Model
-
-For a feature vector $x \in \mathbb{R}^{d+1}$ (with $x_0 = 1$) and weights
-$w \in \mathbb{R}^{d+1}$, the model predicts
-
-$$
-\hat{y} = \sigma(w^\top x) = \frac{1}{1 + e^{-w^\top x}}
-$$
-
-which is interpreted as $P(\text{spam} \mid x)$. `predict_probability`
-computes this for the whole matrix at once as `1 / (1 + np.exp(-(X @ w)))`.
-
-### Loss
-
-Training minimizes the mean binary cross-entropy (negative log-likelihood of a
-Bernoulli model):
-
-$$
-J(w) = -\frac{1}{n} \sum_{i=1}^{n}
-\Big[ y_i \log \hat{y}_i + (1 - y_i) \log (1 - \hat{y}_i) \Big]
-$$
-
-`compute_loss` clips $\hat{y}$ to $[10^{-10},\ 1 - 10^{-10}]$ before taking
-logs. Without this, a confidently wrong prediction saturates the sigmoid to
-exactly 0 or 1 in floating point and the loss becomes `-inf`/`nan`, which
-would also break the stopping criterion below.
-
-### Gradient
-
-The gradient of the cross-entropy with respect to $w$ has the compact closed
-form
+Predicts $\hat{y} = \sigma(w^\top x)$ and minimizes mean binary cross-entropy
+with full-batch gradient descent:
 
 $$
 \nabla_w J = \frac{1}{n} X^\top (\hat{y} - y)
 $$
 
-which follows from $\frac{d\sigma(z)}{dz} = \sigma(z)(1 - \sigma(z))$
-cancelling against the $\frac{1}{\hat{y}(1-\hat{y})}$ that comes out of the
-log terms. In code this is a single matrix product:
+Predictions are clipped to $[10^{-10},\ 1 - 10^{-10}]$ before the log so a
+saturated sigmoid can't produce `nan`. Weights start at zero (safe because the
+loss is convex) and training stops when the loss improves by less than
+$10^{-4}$ between iterations, or at 3,000 iterations.
 
-```python
-gradient = X.T @ (predict_probability(X, weights) - y) / X.shape[0]
-```
+Regularization is switchable and excludes the bias weight:
 
-### Regularization
-
-A penalty term is added to the objective and therefore to the gradient. The
-bias weight $w_0$ is excluded from the penalty in both cases — shrinking the
-intercept has no regularizing benefit and just biases the decision threshold.
-
-| Mode | Penalty added to $J$ | Gradient contribution (for $j \ge 1$) |
-|------|----------------------|----------------------------------------|
+| Mode | Penalty | Gradient contribution |
+|------|---------|-----------------------|
 | `l2` | $\frac{\lambda}{2} \lVert w_{1:} \rVert_2^2$ | $\lambda\, w_j$ |
-| `l1` | $\lambda \lVert w_{1:} \rVert_1$           | $\lambda\, \operatorname{sign}(w_j)$ |
-
-L2 shrinks all weights proportionally toward zero (ridge). L1 applies a
-constant-magnitude push toward zero regardless of weight size, so small
-weights get driven to (or across) zero, producing a sparser model (lasso).
-The `sign` subgradient is the standard choice at $w_j = 0$, where the L1 norm
-is not differentiable.
-
-### Update rule and stopping criterion
-
-Each iteration performs full-batch gradient descent:
-
-$$
-w \leftarrow w - \eta \left( \nabla_w J + \nabla_w R \right)
-$$
-
-Weights are initialized to zero, which is a valid starting point for logistic
-regression because the loss is convex — there is no symmetry-breaking concern
-as there would be in a neural network.
-
-Training stops when the improvement in loss between consecutive iterations
-drops below a tolerance:
-
-$$
-\left| J(w^{(t-1)}) - J(w^{(t)}) \right| < \varepsilon, \qquad \varepsilon = 10^{-4}
-$$
-
-or when `max_iterations` (default 3000) is reached. This is preferred over a
-fixed iteration count because the appropriate number of steps depends heavily
-on the learning rate and regularization strength; the loss-delta rule adapts
-automatically.
-
-All three core functions (`predict_probability`, `compute_loss`,
-`gradient_descent_step`) are fully vectorized. The only Python-level loop is
-over iterations.
+| `l1` | $\lambda \lVert w_{1:} \rVert_1$ | $\lambda\, \operatorname{sign}(w_j)$ |
 
 ## Naive Bayes
 
-### Model
-
-Multinomial Naive Bayes treats each email as a bag of tokens drawn
-independently from a class-conditional categorical distribution. By Bayes'
-rule and the conditional-independence assumption,
+Class priors are empirical frequencies; token likelihoods use Laplace
+smoothing so unseen tokens never zero out a class:
 
 $$
-P(y \mid x) \;\propto\; P(y) \prod_{w \in V} P(w \mid y)^{x_w}
+P(w \mid y) = \frac{\text{count}(w, y) + 1}{\sum_{w'} \text{count}(w', y) + |V|}
 $$
 
-where $x_w$ is the count of token $w$ in the email.
-
-### Training with Laplace smoothing
-
-Class priors are the empirical class frequencies. Token likelihoods are
-count-based with add-one (Laplace) smoothing:
-
-$$
-P(w \mid y) = \frac{\text{count}(w, y) + 1}{\sum_{w' \in V} \text{count}(w', y) + |V|}
-$$
-
-The $+1$ in the numerator and $+|V|$ in the denominator keep the distribution
-normalized while guaranteeing every token has non-zero probability under every
-class. Without it, a single test-set token never seen in the training spam
-would make $P(\text{spam} \mid x) = 0$ outright.
-
-`train_naive_bayes` computes both class-conditional count vectors with a
-single masked sum each (`X[y == 1].sum(axis=0)`), then takes the log of the
-smoothed ratio.
-
-### Prediction in log space
-
-Multiplying hundreds of probabilities well below 1 underflows to zero in
-`float64`. Taking logs turns the product into a sum:
-
-$$
-\hat{y} = \arg\max_{y \in \{\text{ham},\, \text{spam}\}}
-\left[ \log P(y) + \sum_{w \in V} x_w \log P(w \mid y) \right]
-$$
-
-The inner sum is exactly a matrix-vector product between the count matrix and
-the log-likelihood vector, so `predict_naive_bayes` scores every test email
-for both classes with two `X @ log_likelihood` calls and an `argmax` across
-the stacked columns. There is no per-sample loop.
-
-## Evaluation
-
-Spam is the positive class. From the confusion counts
-$\text{TP}, \text{FP}, \text{FN}$:
-
-$$
-\text{Accuracy} = \frac{\#\{\hat{y}_i = y_i\}}{n}, \qquad
-\text{Precision} = \frac{\text{TP}}{\text{TP} + \text{FP}}, \qquad
-\text{Recall} = \frac{\text{TP}}{\text{TP} + \text{FN}}
-$$
-
-Precision answers "of the emails flagged as spam, how many really were?" —
-low precision means real mail lands in the spam folder. Recall answers "of the
-actual spam, how much did we catch?" For a spam filter precision is usually
-the metric to protect, since a false positive (a lost legitimate email) costs
-more than a false negative (one spam message getting through).
+Scoring happens in log space to avoid underflow, and is a single
+`X @ log_likelihood` product per class followed by an `argmax`.
 
 ## Results
 
-Single run, $d = 1000$ features, $\eta = 0.01$, $\lambda = 0.01$,
-$\varepsilon = 10^{-4}$. Numbers move slightly between runs because the fold
-assignment is shuffled without a fixed seed.
+$d = 1000$, $\eta = 0.01$, $\lambda = 0.01$. Numbers vary slightly between
+runs since the fold shuffle is unseeded.
 
-| Model                    | Iterations to converge | Final train loss | Accuracy | Precision | Recall |
-|--------------------------|-----------------------:|-----------------:|---------:|----------:|-------:|
-| Logistic regression (L1) |                    456 |           0.371  |   0.917  |    0.889  |  0.958 |
-| Logistic regression (L2) |                    685 |           0.278  |   0.946  |    0.923  |  0.976 |
-| Naive Bayes              |                      — |               —  |   0.955  |    0.939  |  0.976 |
+| Model | Iterations | Train loss | Accuracy | Precision | Recall |
+|-------|-----------:|-----------:|---------:|----------:|-------:|
+| Logistic regression (L1) | 456 | 0.371 | 0.917 | 0.889 | 0.958 |
+| Logistic regression (L2) | 685 | 0.278 | 0.946 | 0.923 | 0.976 |
+| Naive Bayes | — | — | 0.955 | 0.939 | 0.976 |
 
-Observations:
+- **Naive Bayes wins on every metric** with zero hyperparameters and a single
+  pass over the data — the usual outcome for bag-of-words spam detection.
+- **L1 stops earlier at a higher loss.** The kink at $w_j = 0$ makes weights
+  oscillate under a fixed step size, tripping the loss-delta stop early.
+- **Recall exceeds precision** for every model; raising the logistic
+  regression threshold above 0.5 would trade some recall for precision.
 
-- **Naive Bayes wins on every metric** despite being the simpler model. This is
-  the classic result for bag-of-words spam detection: the conditional
-  independence assumption is badly violated, but the decision boundary it
-  induces is still good, and NB reaches it with zero hyperparameters and a
-  single pass over the data.
-- **L1 stops earlier and at a higher loss than L2.** The constant-magnitude
-  L1 push means the loss surface has kinks at $w_j = 0$; with a fixed step
-  size, weights near zero oscillate across the kink, so the loss-delta
-  criterion trips sooner and the model lands at a worse optimum. L2's smooth
-  penalty lets descent keep making steady progress.
-- **Recall > precision for all models.** The classifiers are slightly
-  trigger-happy. Raising the decision threshold above 0.5 for logistic
-  regression would trade recall for precision.
-  
 ## Repository layout
 
 ```
 .
-├── main.py                 # Full pipeline: loading, both models, evaluation
-├── classcode.py            # Earlier scaffold the final implementation grew out of
-├── enron_spam_data.csv     # Enron spam/ham corpus (~52 MB)
-└── pyproject.toml          # uv project definition
+├── main.py                        # Full pipeline: loading, both models, evaluation
+├── src/enron_spam_classifier/     # Package scaffold
+├── enron_spam_data.csv            # Enron spam/ham corpus (~52 MB)
+└── pyproject.toml                 # uv project definition
 ```
-
-## Dataset
-
-The Enron spam dataset combines legitimate email from the Enron corpus with
-spam collected from several sources. Each row has a `Subject`, `Message`,
-and `Spam/Ham` label. Only the message body is used for features here; the
-subject line is an easy extension.
