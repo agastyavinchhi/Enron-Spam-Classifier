@@ -91,7 +91,6 @@ runs since the fold shuffle is unseeded.
 ```
 .
 ├── main.py                        # Full pipeline: loading, both models, evaluation
-├── src/enron_spam_classifier/     # Package scaffold
 ├── enron_spam_data.csv            # Enron spam/ham corpus (~52 MB)
 └── pyproject.toml                 # uv project definition
 ```
