@@ -1,7 +1,3 @@
-# Name: Agastya Deepak Vinchhi
-# Netid: av351
-# Project 2: Enron Spam Classification with Logistic Regression and Naive Bayes
-
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import CountVectorizer
