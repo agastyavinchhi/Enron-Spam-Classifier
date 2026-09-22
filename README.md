@@ -1,15 +1,15 @@
 # Spam Classification from Scratch: Logistic Regression & Naive Bayes in NumPy
 
 Two text classifiers — **logistic regression** and **Naive Bayes** — built from
-first principles on the Enron spam corpus (~33k emails), without using
-high-level libraries like scikit-learn to implement them.
+first principles on the Enron spam corpus (~33k emails). This project does not use any 
+high-level libraries like scikit-learn. Instead, everything is implemented manually using
+NumPy arrays and Pandas. The loss function,
 
-The point of this project is to do everything by hand. The loss function, the
-gradient, the weight updates, the regularization penalties, the convergence
+The loss function, the gradient, the weight updates, the regularization penalties, the convergence
 check, the class priors and smoothed likelihoods, the log-space scoring, and
 the evaluation metrics are all written directly on NumPy arrays. No
 `.fit()`, no `.predict()`, no black boxes — every line of model logic is
-visible and derived from the math it implements.
+visible and derived from the math it implements!
 
 - **Logistic regression** trained with batch gradient descent on the
   binary cross-entropy loss, with switchable L1 / L2 regularization and a
@@ -27,7 +27,6 @@ visible and derived from the math it implements.
 - [Naive Bayes](#naive-bayes)
 - [Evaluation](#evaluation)
 - [Results](#results)
-- [Design notes](#design-notes)
 - [Repository layout](#repository-layout)
 
 ## Quick start
@@ -242,30 +241,7 @@ Observations:
 - **Recall > precision for all models.** The classifiers are slightly
   trigger-happy. Raising the decision threshold above 0.5 for logistic
   regression would trade recall for precision.
-
-## Design notes
-
-- **Unscaled count features.** Token counts are used as-is, not normalized.
-  The raw counts can be large for long emails, which makes $w^\top x$ large
-  and saturates the sigmoid early in training. This is why the learning rate
-  is a conservative 0.01 — anything much larger overflows `np.exp`. A
-  drop-in alternative is binary presence (`X > 0`), which behaves more like
-  the multivariate-Bernoulli setting and lets logistic regression tolerate a
-  higher $\eta$.
-- **Bias handled as a feature.** Prepending a column of ones to $X$ means the
-  intercept is trained by the same matrix-math update as every other weight,
-  with no special-case code path. The regularization step slices `[1:]` to
-  leave it unpenalized.
-- **Fold-based split.** Rather than a single `permutation` + slice, rows are
-  assigned fold ids via `arange(n) % k` after shuffling. Holding out fold 1
-  gives the 80/20 split; iterating the held-out fold over $0..k-1$ gives
-  5-fold CV with no other changes.
-- **Convex objective.** Logistic regression's cross-entropy is convex in $w$,
-  and both penalties are convex, so batch gradient descent from zero converges
-  to the global minimum for any sufficiently small learning rate. There's no
-  need for random restarts or momentum here; the interesting hyperparameters
-  are $\eta$, $\lambda$, and the feature budget $d$.
-
+  
 ## Repository layout
 
 ```
