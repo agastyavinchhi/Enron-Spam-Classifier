@@ -75,9 +75,10 @@ runs since the fold shuffle is unseeded.
 
 | Model | Iterations | Train loss | Accuracy | Precision | Recall |
 |-------|-----------:|-----------:|---------:|----------:|-------:|
-| Logistic regression (L1) | 456 | 0.371 | 0.917 | 0.889 | 0.958 |
-| Logistic regression (L2) | 685 | 0.278 | 0.946 | 0.923 | 0.976 |
-| Naive Bayes | — | — | 0.955 | 0.939 | 0.976 |
+| Logistic regression (L1) | 457 | 0.371 | 0.911 | 0.879 | 0.955 |
+| Logistic regression (L2) | 683 | 0.278 | 0.944 | 0.922 | 0.971 |
+| Naive Bayes | — | — | 0.953 | 0.933 | 0.976 |
+
 
 - **Naive Bayes wins on every metric** with zero hyperparameters and a single
   pass over the data — the usual outcome for bag-of-words spam detection.
